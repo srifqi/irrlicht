@@ -434,7 +434,10 @@ namespace irr
 		mutable core::stringc PrimarySelection;
 #endif
 #if defined(_IRR_LINUX_X11_XINPUT2_)
-		int currentTouchedCount;
+		// Minetest expects touch pointer IDs to be consecutive, as they are on
+		// Android. X11 doesn't guarantee this, so we emulate it.
+		// This is also used to implement the "touchedCount" field.
+		std::vector<size_t> touch_pointer_ids;
 #endif
 		u32 Width, Height;
 		bool WindowHasFocus;

@@ -116,9 +116,6 @@ CIrrDeviceLinux::CIrrDeviceLinux(const SIrrlichtCreationParameters& param)
 	XInputMethod(0), XInputContext(0),
 	HasNetWM(false),
 #endif
-#if defined(_IRR_LINUX_X11_XINPUT2_)
-	currentTouchedCount(0),
-#endif
 	Width(param.WindowSize.Width), Height(param.WindowSize.Height),
 	WindowHasFocus(false), WindowMinimized(false), WindowMaximized(param.WindowMaximized),
 	ExternalWindow(false), AutorepeatSupport(0)
@@ -1146,19 +1143,42 @@ bool CIrrDeviceLinux::run()
 						XIDeviceEvent *de = (XIDeviceEvent *) cookie->data;
 
 						irrevent.EventType = EET_TOUCH_INPUT_EVENT;
-
-						irrevent.TouchInput.Event = cookie->evtype == XI_TouchUpdate ? ETIE_MOVED : (cookie->evtype == XI_TouchBegin ? ETIE_PRESSED_DOWN : ETIE_LEFT_UP);
-
-						irrevent.TouchInput.ID = de->detail;
 						irrevent.TouchInput.X = de->event_x;
 						irrevent.TouchInput.Y = de->event_y;
 
-						if (irrevent.TouchInput.Event == ETIE_PRESSED_DOWN) {
-							currentTouchedCount++;
-						}
-						irrevent.TouchInput.touchedCount = currentTouchedCount;
-						if (currentTouchedCount > 0 && irrevent.TouchInput.Event == ETIE_LEFT_UP) {
-							currentTouchedCount--;
+						if (cookie->evtype == XI_TouchBegin) {
+							touch_pointer_ids.push_back(de->detail);
+							size_t touch_pointer_idx = touch_pointer_ids.size() - 1;
+							size_t touch_pointer_count = touch_pointer_ids.size();
+
+							irrevent.TouchInput.Event = ETIE_PRESSED_DOWN;
+							irrevent.TouchInput.ID = touch_pointer_idx;
+							irrevent.TouchInput.touchedCount = touch_pointer_count;
+						} else if (cookie->evtype == XI_TouchUpdate) {
+							auto iter = std::find(touch_pointer_ids.begin(), touch_pointer_ids.end(), de->detail);
+							size_t touch_pointer_idx = std::distance(touch_pointer_ids.begin(), iter);
+							size_t touch_pointer_count = touch_pointer_ids.size();
+
+							// This should never happen. Allocate a new ID anyway.
+							if (touch_pointer_idx == touch_pointer_count)
+								touch_pointer_ids.push_back(de->detail);
+
+							irrevent.TouchInput.Event = irr::ETIE_MOVED;
+							irrevent.TouchInput.ID = touch_pointer_idx;
+							irrevent.TouchInput.touchedCount = touch_pointer_count;
+						} else if (cookie->evtype == XI_TouchEnd) {
+							auto iter = std::find(touch_pointer_ids.begin(), touch_pointer_ids.end(), de->detail);
+							size_t touch_pointer_idx = std::distance(touch_pointer_ids.begin(), iter);
+							size_t touch_pointer_count = touch_pointer_ids.size(); // Count the removed pointer, too.
+
+							if (touch_pointer_idx != touch_pointer_count)
+								touch_pointer_ids.erase(touch_pointer_ids.begin() + touch_pointer_idx);
+
+							irrevent.TouchInput.Event = irr::ETIE_LEFT_UP;
+							irrevent.TouchInput.ID = touch_pointer_idx;
+							irrevent.TouchInput.touchedCount = touch_pointer_count;
+						} else {
+							break;
 						}
 
 						postEventFromUser(irrevent);
