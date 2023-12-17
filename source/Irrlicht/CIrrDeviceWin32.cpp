@@ -555,6 +555,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	if (GetCapture() != hWnd && ClickCount > 0)
 		ClickCount = 0;
 
+	RegisterTouchWindow(hWnd, 0);
 
 	struct messageMap
 	{
@@ -768,7 +769,37 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		// get the new codepage used for keyboard input
 		KEYBOARD_INPUT_HKL = GetKeyboardLayout(0);
 		return 0;
+
+	case WM_TOUCH:
+		bool touchHandled = false;
+		size_t cInputs = LOWORD(wParam);
+		PTOUCHINPUT pInputs = new TOUCHINPUT[cInputs];
+		dev = getDeviceFromHWnd(hWnd);
+		if (pInputs) {
+			if (dev) {
+				if (GetTouchInputInfo((HTOUCHINPUT)lParam, cInputs, pInputs, sizeof(TOUCHINPUT))) {
+					for (size_t i = 0; i < cInputs; i ++) {
+						TOUCHINPUT ti = pInputs[i];
+
+						// convert screen coordinate into window coordinate
+						POINT tip;
+						tip.x = TOUCH_COORD_TO_PIXEL(ti.x);
+						tip.y = TOUCH_COORD_TO_PIXEL(ti.y);
+						ScreenToClient(hWnd, &tip);
+
+						if (dev->onTouchInput(ti, tip))
+							touchHandled |= true;
+					}
+				}
+			}
+			delete [] pInputs;
+		}
+		if (touchHandled) {
+			CloseTouchInputHandle((HTOUCHINPUT)lParam);
+			return 0;
+		}
 	}
+
 	return DefWindowProcW(hWnd, message, wParam, lParam);
 }
 
@@ -1214,6 +1245,66 @@ void CIrrDeviceWin32::getWindowsVersion(core::stringc& out)
 void CIrrDeviceWin32::OnResized()
 {
 	Resized = true;
+}
+
+//! Notifies the device that it gets a touch input.
+bool CIrrDeviceWin32::onTouchInput(TOUCHINPUT touchInput, POINT touchInputPos) {
+	SEvent irrevent {};
+	irrevent.EventType = irr::EET_TOUCH_INPUT_EVENT;
+	irrevent.TouchInput.X = touchInputPos.x;
+	irrevent.TouchInput.Y = touchInputPos.y;
+
+	if (touchInput.dwFlags & TOUCHEVENTF_DOWN) {
+		// clear ids before first-touch down event
+		if (touchInput.dwFlags & TOUCHEVENTF_PRIMARY)
+			finger_ids.clear();
+
+		finger_ids.push_back(touchInput.dwID);
+		size_t finger_idx = finger_ids.size() - 1;
+		size_t finger_count = finger_ids.size();
+
+		irrevent.TouchInput.Event = irr::ETIE_PRESSED_DOWN;
+		irrevent.TouchInput.ID = finger_idx;
+		irrevent.TouchInput.touchedCount = finger_count;
+
+		postEventFromUser(irrevent);
+	} else if (touchInput.dwFlags & TOUCHEVENTF_MOVE) {
+		auto iter = std::find(finger_ids.begin(), finger_ids.end(), touchInput.dwID);
+		size_t finger_idx = std::distance(finger_ids.begin(), iter);
+		size_t finger_count = finger_ids.size();
+
+		// This should never happen. Allocate a new ID anyway.
+		if (finger_idx == finger_count)
+			finger_ids.push_back(touchInput.dwID);
+
+		irrevent.TouchInput.Event = irr::ETIE_MOVED;
+		irrevent.TouchInput.ID = finger_idx;
+		irrevent.TouchInput.touchedCount = finger_count;
+
+		postEventFromUser(irrevent);
+	} else if (touchInput.dwFlags & TOUCHEVENTF_UP) {
+		auto iter = std::find(finger_ids.begin(), finger_ids.end(), touchInput.dwID);
+		size_t finger_idx = std::distance(finger_ids.begin(), iter);
+		// To match Android behavior, still count the pointer that was just released.
+		size_t finger_count = finger_ids.size();
+
+		if (finger_idx != finger_count)
+			finger_ids.erase(finger_ids.begin() + finger_idx);
+
+		irrevent.TouchInput.Event = irr::ETIE_LEFT_UP;
+		irrevent.TouchInput.ID = finger_idx;
+		irrevent.TouchInput.touchedCount = finger_count;
+
+		postEventFromUser(irrevent);
+
+		// clear ids after first-touch up event
+		if (touchInput.dwFlags & TOUCHEVENTF_PRIMARY)
+			finger_ids.clear();
+	} else {
+		return false;
+	}
+
+	return true;
 }
 
 //! Resize the render window.

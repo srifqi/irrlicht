@@ -68,6 +68,9 @@ namespace irr
 		/** Must be publis as it is called from free function (event handler) */
 		void OnResized();
 
+		//! Notifies the device that it gets a touch input.
+		bool onTouchInput(TOUCHINPUT touchInput, POINT touchInputPos);
+
 		//! Sets if the window should be resizable in windowed mode.
 		void setResizable(bool resize=false) override;
 
@@ -422,6 +425,11 @@ namespace irr
 		SJoystickWin32Control* JoyControl;
 
 		bool WindowMaximized;
+
+		// Minetest expects touch pointer IDs to be consecutive, as they are on
+		// Android. SDL doesn't guarantee this, so we emulate it.
+		// This is also used to implement the "touchedCount" field.
+		std::vector<DWORD> finger_ids;
 	};
 
 } // end namespace irr
